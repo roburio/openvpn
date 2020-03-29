@@ -204,7 +204,7 @@ module Config : sig
        TODO: openvpn manpage says something about deriving Link_mtu from this *)
 
     | Verb : int k
-
+    | User : string k
     | Verify_client_cert : [ `None | `Optional | `Required ] k
 
   include Gmap.S with type 'a key = 'a k
@@ -246,6 +246,13 @@ module Config : sig
   (** Parses a configuration string, looking up references to external files
       as needed. Validates the client configuration. Default client options are
       applied. *)
+
+  val parse_server : string_of_file:(string -> (string, R.msg) result) ->
+    string -> (t, [> R.msg]) result
+  (** Parses a configuration string, looking up references to external files
+      as needed. Validates the server configuration. Default server options are
+      applied. *)
+
 end
 
 type t
@@ -316,3 +323,4 @@ val new_connection : server -> t
 (** [new_connection server] is to be called when the server accepted a new
     TCP connection, a state [t] is constructed - which can be used with
     {!handle}. *)
+

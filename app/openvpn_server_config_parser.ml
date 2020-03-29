@@ -1,8 +1,6 @@
 open Rresult
 open Openvpn.Config
 
-
-
 let read_config_file fn =
   let str fn =
     Logs.info (fun m -> m "Reading file %S" fn) ;
@@ -22,7 +20,8 @@ let read_config_file fn =
     in loop st_size ;
     Bytes.to_string buf
   in
-  parse_client ~string_of_file:(fun fn -> Ok (str fn)) (str fn)
+  parse_server ~string_of_file:(fun fn -> Ok (str fn)) (str fn)
+
 
 let () =
   if not !Sys.interactive then begin
@@ -35,15 +34,15 @@ let () =
       Fmt.pr "@[<v>%a@]\n" pp rules ;
       Logs.info (fun m -> m "Read %d entries!"
                     (cardinal rules)) ;
-
       begin match
-          parse_client ~string_of_file:(fun _fn -> assert false)
+          parse_server ~string_of_file:(fun _fn -> assert false)
             (Fmt.strf "%a" pp rules) with
       | Error `Msg s->
         Logs.err (fun m ->m "self-test failed to parse: %s" s);
         exit 2
       | Ok dogfood when equal eq rules dogfood -> ()
-      | Ok _ -> Logs.err (fun m -> m "self-test failed"); exit 1
+      | Ok _ ->
+        Logs.err (fun m -> m "self test failed"); exit 1 
       end
     | Error `Msg s -> Logs.err (fun m -> m "%s" s)
   end
