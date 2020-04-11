@@ -32,6 +32,22 @@ let provision_impl =
       Rresult.R.join res
   end
 
+let monitor =
+  let doc = Key.Arg.info ~doc:"monitor host IP" ["monitor"] in
+  Key.(create "monitor" Arg.(opt (some ip_address) None doc))
+
+let syslog =
+  let doc = Key.Arg.info ~doc:"syslog host IP" ["syslog"] in
+  Key.(create "syslog" Arg.(opt (some ip_address) None doc))
+
+let name =
+  let doc = Key.Arg.info ~doc:"Name of the unikernel" ["name"] in
+  Key.(create "name" Arg.(opt string "as250" doc))
+
+let keys = [ Key.abstract name ; Key.abstract monitor ; Key.abstract syslog ]
+
+let management_stack = generic_stackv4v6 ~group:"management" (netif ~group:"management" "management")
+
 let openvpn_handler =
   let packages =
     let pin = "git+https://github.com/roburio/openvpn.git" in
@@ -41,11 +57,14 @@ let openvpn_handler =
       package "mirage-kv";
       package ~min:"3.8.0" "mirage-runtime";
       package "provision";
+      package ~sublibs:["mirage"] ~min:"0.3.0" "logs-syslog" ;
+      package ~min:"0.0.2" "monitoring-experiments" ;
     ]
   in
   foreign
+    ~keys
     ~packages
-    "Unikernel.Main" (random @-> mclock @-> pclock @-> time @-> stackv4v6 @-> network @-> ethernet @-> arpv4 @-> ipv4 @-> provision @-> job)
+    "Unikernel.Main" (console @-> random @-> mclock @-> pclock @-> time @-> stackv4v6 @-> network @-> ethernet @-> arpv4 @-> ipv4 @-> provision @-> stackv4v6 @-> job)
 
 let () =
-  register "ovpn-router" [openvpn_handler $ default_random $ default_monotonic_clock $ default_posix_clock $ default_time $ generic_stackv4v6 default_network $ private_netif $ private_ethernet $ private_arp $ private_ipv4 $ provision_impl ]
+  register "ovpn-router" [openvpn_handler $ default_console $ default_random $ default_monotonic_clock $ default_posix_clock $ default_time $ generic_stackv4v6 default_network $ private_netif $ private_ethernet $ private_arp $ private_ipv4 $ provision_impl $ management_stack ]

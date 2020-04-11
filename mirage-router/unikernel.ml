@@ -31,10 +31,14 @@
 
 open Lwt.Infix
 
-module Main (R : Mirage_random.S) (M : Mirage_clock.MCLOCK) (P : Mirage_clock.PCLOCK) (T : Mirage_time.S) (S : Mirage_stack.V4V6)
-    (N : Mirage_net.S) (E : Mirage_protocols.ETHERNET) (A : Mirage_protocols.ARP) (I : Mirage_protocols.IPV4) (_ : sig end) = struct
+module Main (C : Mirage_console.S) (R : Mirage_random.S) (M : Mirage_clock.MCLOCK) (P : Mirage_clock.PCLOCK) (T : Mirage_time.S) (S : Mirage_stack.V4V6)
+    (N : Mirage_net.S) (E : Mirage_protocols.ETHERNET) (A : Mirage_protocols.ARP) (I : Mirage_protocols.IPV4) (_ : sig end)
+    (Management : Mirage_stack.V4V6)
+     = struct
 
   module O = Openvpn_mirage.Make(R)(M)(P)(T)(S)
+  module Monitoring = Monitoring_experiments.Make(T)(Management)
+  module Syslog = Logs_syslog_mirage.Udp(C)(P)(Management)
 
   let read_config provision =
     let len = Provision.length provision in
@@ -47,7 +51,7 @@ module Main (R : Mirage_random.S) (M : Mirage_clock.MCLOCK) (P : Mirage_clock.PC
   let local_network ip =
     let cidr = Key_gen.private_ipv4 () in
     if Ipaddr.V4.compare (Ipaddr.V4.Prefix.address cidr) ip = 0 then begin
-      Logs.warn (fun m -> m "a packet directed to us (ignoring)");
+      (* Logs.warn (fun m -> m "a packet directed to us (ignoring)"); *)
       false
     end else
       Ipaddr.V4.Prefix.mem ip cidr
@@ -134,9 +138,9 @@ module Main (R : Mirage_random.S) (M : Mirage_clock.MCLOCK) (P : Mirage_clock.PC
         Fragments.process t.private_fragments (M.elapsed_ns ()) ip_hdr payload
       in
       t.private_fragments <- c;
-      Logs.info (fun m -> m "%B forwarding packet %a"
-                    (match pkt with None -> false | Some _ -> true)
-                    Ipv4_packet.pp ip_hdr);
+      Logs.debug (fun m -> m "%B forwarding packet %a"
+                     (match pkt with None -> false | Some _ -> true)
+                     Ipv4_packet.pp ip_hdr);
       match pkt with
       | None -> Lwt.return_unit
       | Some (hdr, pay) ->
@@ -229,8 +233,9 @@ module Main (R : Mirage_random.S) (M : Mirage_clock.MCLOCK) (P : Mirage_clock.PC
                         | Ok () -> ()
                         | Error e ->
                           (* could send back host unreachable if this was an arp timeout *)
-                          Logs.err (fun m -> m "error %a while forwarding %a"
-                                       I.pp_error e Ipv4_packet.pp hdr))
+                          (* Logs.err (fun m -> m "error %a while forwarding %a"
+                                         I.pp_error e Ipv4_packet.pp hdr)) *)
+                          ())
                   | Error (`Icmp pay) ->
                     (* send icmp error back via ovpn *)
                     let hdr = {
@@ -246,8 +251,9 @@ module Main (R : Mirage_random.S) (M : Mirage_clock.MCLOCK) (P : Mirage_clock.PC
                       ())
                   | Error `Drop -> ()
               else
-                Logs.warn (fun m -> m "ignoring %a (IPv4 packet received via the tunnel, which destination is not our network %a)"
-                              Ipv4_packet.pp hdr Ipaddr.V4.Prefix.pp (Key_gen.private_ipv4 ()))
+                (* Logs.warn (fun m -> m "ignoring %a (IPv4 packet received via the tunnel, which destination is not our network %a)"
+                              Ipv4_packet.pp hdr Ipaddr.V4.Prefix.pp (Key_gen.private_ipv4 ())) *)
+                ()
           end;
           Lwt.return c
         | Error msg ->
@@ -258,7 +264,14 @@ module Main (R : Mirage_random.S) (M : Mirage_clock.MCLOCK) (P : Mirage_clock.PC
     t.ovpn_fragments <- frags;
     ovpn_recv t
 
-  let start _ _ _ _ s net eth arp ip data =
+  let start c _ _ _ _ s net eth arp ip data management =
+    let hostname = Key_gen.name () in
+    (match Key_gen.syslog () with
+     | None -> Logs.warn (fun m -> m "no syslog specified, dumping on stdout")
+     | Some ip -> Logs.set_reporter (Syslog.create c management ip ~hostname ()));
+    (match Key_gen.monitor () with
+     | None -> Logs.warn (fun m -> m "no monitor specified, not outputting statistics")
+     | Some ip -> Monitoring.create ~hostname ip management);
     (let open Lwt_result.Infix in
      Lwt.return (read_config data) >>= fun config ->
      O.connect config s >>= fun ovpn ->
