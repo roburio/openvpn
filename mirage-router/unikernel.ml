@@ -32,16 +32,17 @@
 open Lwt.Infix
 
 module Main (R : Mirage_random.S) (M : Mirage_clock.MCLOCK) (P : Mirage_clock.PCLOCK) (T : Mirage_time.S) (S : Mirage_stack.V4V6)
-    (N : Mirage_net.S) (E : Mirage_protocols.ETHERNET) (A : Mirage_protocols.ARP) (I : Mirage_protocols.IPV4) (FS: Mirage_kv.RO) = struct
+    (N : Mirage_net.S) (E : Mirage_protocols.ETHERNET) (A : Mirage_protocols.ARP) (I : Mirage_protocols.IPV4) (_ : sig end) = struct
 
   module O = Openvpn_mirage.Make(R)(M)(P)(T)(S)
 
-  let read_config data =
-    FS.get data (Mirage_kv.Key.v "openvpn.config") >|= function
-    | Error e -> Rresult.R.error_to_msg ~pp_error:FS.pp_error (Error e)
-    | Ok data ->
-      let string_of_file _ = Error (`Msg "not supported") in
-      Openvpn.Config.parse_client ~string_of_file data
+  let read_config provision =
+    let len = Provision.length provision in
+    let res = Bytes.create len in
+    Provision.load_bytes provision ~src_off:0 res ~dst_off:0 ~len ;
+    let data = Bytes.unsafe_to_string res in
+    let string_of_file _ = Error (`Msg "not supported") in
+    Openvpn.Config.parse_client ~string_of_file data
 
   let local_network ip =
     let cidr = Key_gen.private_ipv4 () in
@@ -259,7 +260,7 @@ module Main (R : Mirage_random.S) (M : Mirage_clock.MCLOCK) (P : Mirage_clock.PC
 
   let start _ _ _ _ s net eth arp ip data =
     (let open Lwt_result.Infix in
-     read_config data >>= fun config ->
+     Lwt.return (read_config data) >>= fun config ->
      O.connect config s >>= fun ovpn ->
      Logs.info (fun m -> m "tunnel established");
      let t = {
